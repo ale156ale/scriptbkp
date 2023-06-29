@@ -1,0 +1,61 @@
+#!/bin/bash
+#set -x  ## debug
+
+#cloudns.net - gestão de domínio
+DESTINO=meudominio.com
+PORTA=22
+
+echo -e "extra parametros: sync_all.bsh --delete para deleção\n\n"
+
+if [ "$1" == "--delete" ]; then
+	EXTRA_PAR="--delete"
+else
+	EXTRA_PAR=""
+fi
+#scp -P$PORTA -rvC -o ServerAliveInterval=15 -o ServerAliveCountMax=3 user@$DESTINO:/mnt/stor/user1 ./
+DIA=$(date)
+sudo bash -c "echo '--- INICIO SYNC $EXTRA_PAR / $SD $DIA ---' >> /home/user/sync.log"
+
+#copia a pasta de scripts
+if [ -d "/mnt/stor/scripts" ]; then
+   cp /home/user/*.bsh /mnt/stor/scripts
+else
+   sudo mkdir /mnt/stor/scripts
+   cp /home/user/*.bsh /mnt/stor/scripts
+fi
+
+#pasta /mnt/stor/Backup
+RESULT=1
+
+PROCESSO=$(pgrep -x sync_all.bsh | wc -l)
+# o if abaixo evita encavalar processos de rsync caso seja muito extenso a syncronização
+if [ "$PROCESSO" -gt 2 ] # verifica se o processo rsync está sendo executado
+then
+	RESULT=0 # sai do processo
+	echo "Processo existente" | sudo tee -a /home/user/sync.log
+fi
+
+#VERIFICA SE A UNIDADE SDA1 ESTÁ MONTADA
+PROCESSO=$(sudo mount -l | grep sda1 | awk {'print $1'})
+if [ "$PROCESSO" != "/dev/sda1" ]
+then
+	RESULT=0 #sai do processo
+	echo "Unidade não montada ... rebootando ...." | sudo tee -a /home/user/sync.log
+	sudo init 6
+fi	
+
+#Copia scripts no storage, local e remoto
+ssh -p$PORTA ale@$DESTINO "mkdir -p /mnt/stor/Backup/scripts/city1/ ; cp -rv /home/user/* /mnt/stor/Backup/scripts/city1/"
+mkdir -p /mnt/stor/Backup/scripts/city2/ ; cp -rv /home/user/* /mnt/stor/Backup/scripts/city2/
+
+
+#Sincroniza Diretório Backup
+while [ "$RESULT" -ne 0 ]; do
+   rsync -ravptP --partial-dir=/mnt/stor/rsync-part $EXTRA_PAR -e="ssh -p$PORTA -l user -o ServerAliveInterval=15 -o ServerAliveCountMax=3" user@$DESTINO:"/mnt/stor/Backup" /mnt/stor
+   RESULT=$? 
+done
+
+DIA=$(date)
+sudo bash -c "echo '--- FIM SYNC $EXTRA_PAR / $SD $DIA ---' >> /home/user/sync.log"
+sudo bash -c "echo ' ' >> /home/user/sync.log"
+
